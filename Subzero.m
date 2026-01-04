@@ -7,13 +7,13 @@ RIDGING=false;
 
 FRACTURES=false;
 
-PERIODIC=false;
+PERIODIC=true;
 
 PACKING = false;
 
 WELDING = false;
 
-CORNERS = true;
+CORNERS = false;
 
 COLLISION = true;
 
@@ -23,7 +23,7 @@ RAFTING = false;
 
 KEEP_MIN = false; %Retain floes in simulation that get smaller set threshold
 
-ifPlot = true; %Plot floe figures or not?
+ifPlot = false; %Plot floe figures or not?
 
 ifPlotStress = false; %Plot floe figures with floes shaded by stress values
 
@@ -33,7 +33,7 @@ justfrac = false;
 
 %% Initialize model vars
 
-dt=10; %Time step in sec
+dt=20; %Time step in sec
 height.mean = 0.25; %mean value of thickness for initial floes
 height.delta = 0; %maximum deviation about the mean thickness if a distribution is desired
 
@@ -50,13 +50,12 @@ winds.v=V0*ones(size(ocean.Xocn));
 
 %Define boundaries
 c2_boundary=initialize_boundaries();
-f=2*pi/(24*3600);
+%f=2*pi/(24*3600);
 Ly = max(c2_boundary(2,:));Lx = max(c2_boundary(1,:));
-min_floe_size = 4*Lx*Ly/10000; %set minimum floe size for initialization
+min_floe_size = 1e6; %set minimum floe size for initialization
 
-%Initialize Floe state
-target_concentration = 1; %Set target concentration for initial conditions
-[Floe, Nb] = initial_concentration(c2_boundary,target_concentration,height,10,min_floe_size);
+%Initialize Floe state -> read in from Julia simulation!
+[Floe, Nb] = initial_concentration(height, min_floe_size, Lx, Ly);
 
 %create polyshape of any boundary floes
 if Nb >0
@@ -67,11 +66,10 @@ end
 c2_boundary_poly = polyshape(c2_boundary');
 c2_border = polyshape(2*[-Lx -Lx Lx Lx; -Ly Ly Ly -Ly]'); c2_border = subtract(c2_border, c2_boundary_poly);
 floebound = initialize_floe_values(c2_border, height);
+
 if isfield(Floe,'poly')
     Floe=rmfield(Floe,{'poly'});
 end
-min_floe_size = (4*Lx*Ly-sum(cat(1,Floe(1:Nb).area)))/20000; %set minimum floe size for simulation
-
 %calculate elastic modulus used in floe interactions
 global Modulus
 Modulus = 1.5e3*(mean(sqrt(cat(1,Floe.area)))+min(sqrt(cat(1,Floe.area))));
@@ -81,23 +79,23 @@ save('Modulus.mat','Modulus');
 
 dhdt = 1; %atmospheric heat flux
 
-nDTOut=150; %Output frequency (in number of time steps)
+nDTOut=50; %Output frequency (in number of time steps)
 
-nSnapshots=50; %Total number of model snapshots to save
+nDT= 5000; %Total number of time steps
 
-nDT=nDTOut*nSnapshots; %Total number of time steps
+nSnapshots= nDT / nDTOut; %Total number of model snapshots to save
 
 nSimp = 20; %Timesteps between simplification of floe boundaries
 
 % Set parallel computing inputs
-%nPar = 18; %Number of workers for parfor
-%poolobj = gcp('nocreate'); % If no pool, do not create new one.
-%if isempty(poolobj)
+% nPar = 8; %Number of workers for parfor
+% poolobj = gcp('nocreate'); % If no pool, do not create new one.
+% if isempty(poolobj)
 %    parpool(nPar);
-%else
+% else
 %    delete(poolobj);
 %    parpool(nPar);
-%end
+% end
 
 target_concentration=1; %Set target concentration for when creation of new elements will be run
 tStart = tic; 
@@ -117,16 +115,16 @@ Xc = (xc(1:end-1)+xc(2:end))/2; Yc = -(yc(1:end-1)+yc(2:end))/2;
 dissolvedNEW=zeros(Ny,Nx);
 
 %Initiailize Eulearian Data
-[eulerian_data] = calc_eulerian_data(Floe,Nx,Ny,Nb,c2_boundary,PERIODIC);
+% [eulerian_data] = calc_eulerian_data(Floe,Nx,Ny,Nb,c2_boundary,PERIODIC);
 Vd = zeros(Ny,Nx,2);
 Vdnew=zeros(Ny, Nx);
-SigXX = zeros(Ny, Nx); SigYX = zeros(Ny, Nx);
-SigXY = zeros(Ny, Nx); SigYY = zeros(Ny, Nx);
-Eux = zeros(Ny, Nx); Evx = zeros(Ny, Nx);
-Euy = zeros(Ny, Nx); Evy = zeros(Ny, Nx);
-U = zeros(Ny, Nx); V = zeros(Ny, Nx);
-dU = zeros(Ny, Nx); dV = zeros(Ny, Nx);
-Sig = zeros(Ny, Nx); mass = zeros(Ny,Nx);
+% SigXX = zeros(Ny, Nx); SigYX = zeros(Ny, Nx);
+% SigXY = zeros(Ny, Nx); SigYY = zeros(Ny, Nx);
+% Eux = zeros(Ny, Nx); Evx = zeros(Ny, Nx);
+% Euy = zeros(Ny, Nx); Evy = zeros(Ny, Nx);
+% U = zeros(Ny, Nx); V = zeros(Ny, Nx);
+% dU = zeros(Ny, Nx); dV = zeros(Ny, Nx);
+% Sig = zeros(Ny, Nx); mass = zeros(Ny,Nx);
 
 %% Calc interactions and plot initial state
 Floe=Floe(logical(cat(1,Floe.alive)));
@@ -148,7 +146,7 @@ end
 
 %% Solving for floe trajectories
 tic; 
-while im_num<nSnapshots
+while i_step<=nDT
 
     if mod(i_step,10)==0
         disp(' ');
@@ -220,31 +218,31 @@ while im_num<nSnapshots
     if mod(i_step,nDTOut)==0  %plot the state after a number of timesteps
         
 
-        [eulerian_data] = calc_eulerian_data(Floe,Nx,Ny,Nb,c2_boundary,PERIODIC);
+        % [eulerian_data] = calc_eulerian_data(Floe,Nx,Ny,Nb,c2_boundary,PERIODIC);
         if ifPlot
             [fig] = plot_basic(fig, Time,Floe,ocean,c2_boundary_poly,Nb,PERIODIC);
 %              saveas(fig,['./figs/' num2str(im_num,'%03.f') '.jpg'],'jpg');
         end
         
-        %Average coarse eulerian data
-        if AVERAGE
-            SigXXa = SigXX/fix(nDTOut); SigYXa = SigYX/fix(nDTOut);
-            SigXYa = SigXY/fix(nDTOut); SigYYa = SigYY/fix(nDTOut);
-            Eux = Eux/fix(nDTOut); Evx = Evx/fix(nDTOut);
-            Euy = Euy/fix(nDTOut); Evy = Evy/fix(nDTOut);
-            U = U/fix(nDTOut); V = V/fix(nDTOut);
-            dU = dU/fix(nDTOut); dV = dV/fix(nDTOut);
-            Sig = Sig/fix(nDTOut); 
-            mass = mass/fix(nDTOut);
-        else
-            SigXXa = squeeze(eulerian_data.stressxx); SigYXa = squeeze(eulerian_data.stressyx);
-            SigXYa = squeeze(eulerian_data.stressxy); SigYYa = squeeze(eulerian_data.stressyy);
-            Eux = squeeze(eulerian_data.strainux); Evx = squeeze(eulerian_data.strainvx);
-            Euy = squeeze(eulerian_data.strainuy); Evy = squeeze(eulerian_data.strainvy);
-            U = U+squeeze(eulerian_data.u);V = V+squeeze(eulerian_data.v);
-            dU = dU+squeeze(eulerian_data.du);dV = dV+squeeze(eulerian_data.dv);
-            Sig = Sig+squeeze(eulerian_data.stress);
-        end
+        % %Average coarse eulerian data
+        % if AVERAGE
+        %     SigXXa = SigXX/fix(nDTOut); SigYXa = SigYX/fix(nDTOut);
+        %     SigXYa = SigXY/fix(nDTOut); SigYYa = SigYY/fix(nDTOut);
+        %     Eux = Eux/fix(nDTOut); Evx = Evx/fix(nDTOut);
+        %     Euy = Euy/fix(nDTOut); Evy = Evy/fix(nDTOut);
+        %     U = U/fix(nDTOut); V = V/fix(nDTOut);
+        %     dU = dU/fix(nDTOut); dV = dV/fix(nDTOut);
+        %     Sig = Sig/fix(nDTOut); 
+        %     mass = mass/fix(nDTOut);
+        % else
+        %     SigXXa = squeeze(eulerian_data.stressxx); SigYXa = squeeze(eulerian_data.stressyx);
+        %     SigXYa = squeeze(eulerian_data.stressxy); SigYYa = squeeze(eulerian_data.stressyy);
+        %     Eux = squeeze(eulerian_data.strainux); Evx = squeeze(eulerian_data.strainvx);
+        %     Euy = squeeze(eulerian_data.strainuy); Evy = squeeze(eulerian_data.strainvy);
+        %     U = U+squeeze(eulerian_data.u);V = V+squeeze(eulerian_data.v);
+        %     dU = dU+squeeze(eulerian_data.du);dV = dV+squeeze(eulerian_data.dv);
+        %     Sig = Sig+squeeze(eulerian_data.stress);
+        % end
         
                 
         if ifPlotStress
@@ -282,14 +280,14 @@ while im_num<nSnapshots
     
     %output and reset data values
     if mod(i_step,nDTOut)==0
-        save(['./Floes/Floe' num2str(im_num,'%07.f') '.mat'],'Floe','eulerian_data','SigXXa','SigXYa', 'SigYYa','U','dU','mass');
-        SigXX = zeros(Ny, Nx); SigYX = zeros(Ny, Nx);
-        SigXY = zeros(Ny, Nx); SigYY = zeros(Ny, Nx);
-        Eux = zeros(Ny, Nx); Evx = zeros(Ny, Nx);
-        Euy = zeros(Ny, Nx); Evy = zeros(Ny, Nx);
-        U = zeros(Ny, Nx); V = zeros(Ny, Nx);
-        dU = zeros(Ny, Nx); dV = zeros(Ny, Nx);
-        Sig = zeros(Ny, Nx); mass = zeros(Ny, Nx);
+        save(['./Floes/Floe' num2str(im_num,'%07.f') '.mat'],'Floe');
+        % SigXX = zeros(Ny, Nx); SigYX = zeros(Ny, Nx);
+        % SigXY = zeros(Ny, Nx); SigYY = zeros(Ny, Nx);
+        % Eux = zeros(Ny, Nx); Evx = zeros(Ny, Nx);
+        % Euy = zeros(Ny, Nx); Evy = zeros(Ny, Nx);
+        % U = zeros(Ny, Nx); V = zeros(Ny, Nx);
+        % dU = zeros(Ny, Nx); dV = zeros(Ny, Nx);
+        % Sig = zeros(Ny, Nx); mass = zeros(Ny, Nx);
         
         M = cat(1,Floe.mass);
         Mtot(im_num) = sum(M)+sum(Vdnew(:));
@@ -301,17 +299,17 @@ while im_num<nSnapshots
     [Floe,dissolvedNEW] = floe_interactions_all(Floe, floebound, ocean, winds, c2_boundary, dt, HFo,min_floe_size, Nx,Ny,Nb, dissolvedNEW,doInt,COLLISION, PERIODIC, RIDGING, RAFTING);
 
     %Average coarse eulerian data
-    if AVERAGE
-        [eulerian_data] = calc_eulerian_data(Floe,Nx,Ny,Nb,c2_boundary,PERIODIC);
-        SigXX = SigXX+squeeze(eulerian_data.stressxx); SigYX = SigYX+squeeze(eulerian_data.stressyx);
-        SigXY = SigXY+squeeze(eulerian_data.stressxy); SigYY = SigYY+squeeze(eulerian_data.stressyy);
-        Eux = Eux+squeeze(eulerian_data.strainux); Evx = Evx+squeeze(eulerian_data.strainvx);
-        Euy = Euy+squeeze(eulerian_data.strainuy); Evy = Evy+squeeze(eulerian_data.strainvy);
-        U = U+squeeze(eulerian_data.u);V = V+squeeze(eulerian_data.v);
-        dU = dU+squeeze(eulerian_data.du);dV = dV+squeeze(eulerian_data.dv); 
-        Sig = Sig+squeeze(eulerian_data.stress);
-        mass = mass+squeeze(eulerian_data.Mtot);
-    end
+    % if AVERAGE
+    %     [eulerian_data] = calc_eulerian_data(Floe,Nx,Ny,Nb,c2_boundary,PERIODIC);
+    %     SigXX = SigXX+squeeze(eulerian_data.stressxx); SigYX = SigYX+squeeze(eulerian_data.stressyx);
+    %     SigXY = SigXY+squeeze(eulerian_data.stressxy); SigYY = SigYY+squeeze(eulerian_data.stressyy);
+    %     Eux = Eux+squeeze(eulerian_data.strainux); Evx = Evx+squeeze(eulerian_data.strainvx);
+    %     Euy = Euy+squeeze(eulerian_data.strainuy); Evy = Evy+squeeze(eulerian_data.strainvy);
+    %     U = U+squeeze(eulerian_data.u);V = V+squeeze(eulerian_data.v);
+    %     dU = dU+squeeze(eulerian_data.du);dV = dV+squeeze(eulerian_data.dv); 
+    %     Sig = Sig+squeeze(eulerian_data.stress);
+    %     mass = mass+squeeze(eulerian_data.Mtot);
+    % end
     
     % Weld floes
     if WELDING && mod(i_step,25)==0 && dhdt > 0
