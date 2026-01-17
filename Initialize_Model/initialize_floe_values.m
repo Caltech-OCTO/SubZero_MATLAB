@@ -27,11 +27,12 @@ FloeNEW.FxOA = 0; FloeNEW.FyOA = 0; FloeNEW.torqueOA = 0; %Forces/torques from o
 
 err = 1;
 count = 1;
+npoints = 100;
 while err > 0.1
-    FloeNEW.X = FloeNEW.rmax*(2*rand(1000,1) - 1); %X coordinate for monte-carlo integration 
-    FloeNEW.Y = FloeNEW.rmax*(2*rand(1000,1) - 1); %Y coordinate for monte-carlo integration
+    FloeNEW.X = FloeNEW.rmax*(2*rand(npoints,1) - 1); %X coordinate for monte-carlo integration 
+    FloeNEW.Y = FloeNEW.rmax*(2*rand(npoints,1) - 1); %Y coordinate for monte-carlo integration
     FloeNEW.A = inpolygon(FloeNEW.X,FloeNEW.Y,FloeNEW.c_alpha(1,:),FloeNEW.c_alpha(2,:)); %Identify which are within floe boundary
-    err = abs((sum(FloeNEW.A)/1000*4*FloeNEW.rmax^2-area(polya)))/area(polya);
+    err = abs((sum(FloeNEW.A)/npoints*4*FloeNEW.rmax^2-area(polya)))/area(polya);
     count = count+1; if count>10; err = 0; FloeNEW.alive = 0; end
 end
 
